@@ -33,3 +33,4 @@ pnpm-debug.log*
 # OS/editor junk
 .DS_Store
 Thumbs.db
+desktop/resources/bin/
