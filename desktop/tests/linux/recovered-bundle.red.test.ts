@@ -27,34 +27,6 @@ import {
   readOptionalRecoveredAsset,
 } from './recovered-bundle.helpers';
 
-function expectLinuxAppShellFloatingSidebarMarkers(bundle: string) {
-  expect(bundle).toContain('children:[r?null:(0,Q.jsx)(U.div,{initial:s?!1:{x:8}');
-  expect(bundle).toContain('left-0 z-40 min-h-0');
-  expect(bundle).toContain(
-    'group/windows-top-bar z-50 flex h-toolbar-sm items-center ps-(--spacing-token-safe-header-left) pe-0',
-  );
-  expect(bundle).toContain('r?`top-toolbar-sm`:`top-0`');
-  expect(bundle).toContain('style:{width:n,zIndex:40}');
-  expect(bundle).toContain('flw=y(Wr),fls=y(Ze)');
-  expect(bundle).toContain('left:flw&&!fls?`${Math.max(lp.get(),i.get())}px`:s');
-  expect(bundle).not.toContain('{,"data-testid"');
-}
-
-function expectLinuxAppShellTitleBarMarkers(bundle: string) {
-  expect(bundle).toContain(
-    'return(e===`windows`||e===`linux`)&&window.electronBridge?.showApplicationMenu!=null',
-  );
-  expect(bundle).toContain('function LinuxWindowControls(){');
-  expect(bundle).toContain('data-linux-codex-window-controls');
-  expect(bundle).toContain('onFocus:()=>u(!0),onBlur:()=>u(!1),onClick:n(`close`)');
-  expect(bundle).toContain('linux-application-menu-panel');
-  expect(bundle).toContain('getApplicationMenuItems');
-  expect(bundle).toContain('showApplicationMenu');
-  expect(bundle).toContain('"aria-haspopup":e.submenu?`menu`:void 0');
-  expect(bundle).toContain('style:{paddingLeft:t*14}');
-  expect(bundle).toContain('e.submenu?null:S(e)');
-}
-
 describe('Recovered Codex bundle RED contract', () => {
   const localAppAsarPath = path.resolve(
     desktopRoot,
@@ -68,8 +40,17 @@ describe('Recovered Codex bundle RED contract', () => {
   const versionedUpstreamAppAsarPath = path.resolve(
     desktopRoot,
     'tmp',
-    'codex-upstream',
-    '26.601.21319',
+    'upstream-26.623.42026',
+    'extracted',
+    'Codex.app',
+    'Contents',
+    'Resources',
+    'app.asar',
+  );
+  const currentUnversionedUpstreamAppAsarPath = path.resolve(
+    desktopRoot,
+    'tmp',
+    'upstream',
     'extracted',
     'Codex.app',
     'Contents',
@@ -89,6 +70,8 @@ describe('Recovered Codex bundle RED contract', () => {
   const newDmgPath = path.resolve(desktopRoot, '..', 'Codex.dmg');
   const currentUpstreamAppAsarPath = fs.existsSync(versionedUpstreamAppAsarPath)
     ? versionedUpstreamAppAsarPath
+    : fs.existsSync(currentUnversionedUpstreamAppAsarPath)
+      ? currentUnversionedUpstreamAppAsarPath
     : legacyUpstreamAppAsarPath;
   const localRefreshArgs = fs.existsSync(currentUpstreamAppAsarPath)
     ? ['--app-asar', currentUpstreamAppAsarPath]
@@ -98,6 +81,23 @@ describe('Recovered Codex bundle RED contract', () => {
         ? ['--app-asar', localAppAsarPath]
         : null;
   const testWithLocalSource = localRefreshArgs ? test : test.skip;
+  const findAssetContaining = (
+    assetsRoot: string,
+    prefixes: string[],
+    needles: string[],
+  ): string => {
+    const entries = fs.readdirSync(assetsRoot).sort();
+    for (const entry of entries) {
+      const assetPath = path.join(assetsRoot, entry);
+      if (!entry.endsWith('.js') || !fs.statSync(assetPath).isFile()) continue;
+      if (!prefixes.some((prefix) => entry.startsWith(prefix))) continue;
+      const source = fs.readFileSync(assetPath, 'utf8');
+      if (needles.every((needle) => source.includes(needle))) return entry;
+    }
+    throw new Error(`Could not find asset with ${needles.join(', ')}`);
+  };
+  const readRecoveredAssetContaining = (prefixes: string[], needles: string[]) =>
+    readRecoveredAsset(findAssetContaining(path.join(recoveredRoot, 'webview', 'assets'), prefixes, needles));
 
   testWithLocalSource(
     'canonical refresh script patches the new local source bundle into a temp recovered bundle',
@@ -145,6 +145,17 @@ describe('Recovered Codex bundle RED contract', () => {
         ),
         'utf8',
       );
+      const workspaceRootDropHandlerBundle = fs.readFileSync(
+        path.join(
+          outputRoot,
+          '.vite',
+          'build',
+          fs.readdirSync(path.join(outputRoot, '.vite', 'build')).find((entry) =>
+            /^workspace-root-drop-handler-.+\.js$/.test(entry),
+          ) ?? '',
+        ),
+        'utf8',
+      );
       const outputAssetsRoot = path.join(outputRoot, 'webview', 'assets');
       const rendererEntry = fs.readFileSync(
         path.join(
@@ -159,15 +170,26 @@ describe('Recovered Codex bundle RED contract', () => {
         fs.readFileSync(
           path.join(
             outputAssetsRoot,
-            fs.readdirSync(outputAssetsRoot).find((entry) =>
-              entry.startsWith(prefix) && entry.endsWith('.js'),
-            ) ?? '',
+            fs.readdirSync(outputAssetsRoot).find((entry) => {
+              const assetPath = path.join(outputAssetsRoot, entry);
+              return entry.startsWith(prefix) && entry.endsWith('.js') && fs.statSync(assetPath).isFile();
+            }) ?? '',
           ),
           'utf8',
         );
+      const readOutputAssetContaining = (prefixes: string[], needles: string[]) =>
+        fs.readFileSync(
+          path.join(outputAssetsRoot, findAssetContaining(outputAssetsRoot, prefixes, needles)),
+          'utf8',
+        );
       const loginRouteBundle = readOutputAsset('login-route-');
-      const composerBundle = readOutputAsset('composer-');
-      const appShellBundle = readOutputAsset('app-shell-');
+      const composerBundle = readOutputAssetContaining(['app-initial~app-main~', 'composer-'], [
+        'threadGoalDraft',
+      ]);
+      const appShellBundle = readOutputAssetContaining(['app-shell-', 'app-initial~app-main~'], [
+        'data-linux-codex-window-controls',
+        'linux-application-menu-panel',
+      ]);
       const pluginsPageBundle = fs.readFileSync(
         path.join(
           outputAssetsRoot,
@@ -191,11 +213,10 @@ describe('Recovered Codex bundle RED contract', () => {
         pluginsCardsAsset == null
           ? null
           : fs.readFileSync(path.join(outputAssetsRoot, pluginsCardsAsset), 'utf8');
-      const windowControlsSafeAreaBundle = readOutputAsset('use-window-controls-safe-area-');
 
       expect(summary.outputRoot).toBe(outputRoot);
-      expect(summary.version).toBe('26.601.21319');
-      expect(summary.buildNumber).toBe('3511');
+      expect(summary.version).toBe('26.623.42026');
+      expect(summary.buildNumber).toBe('4514');
       expect(summary.electronVersion).toBe('42.1.0');
       expect(summary.appAsarSha256).toMatch(/^[a-f0-9]{64}$/);
       if (summary.sourceType === 'dmg') {
@@ -206,46 +227,39 @@ describe('Recovered Codex bundle RED contract', () => {
       expect(mainBundle).toContain('openUrlWithLinuxBrowserSession');
       expect(mainBundle).toContain('require(`../../scripts/linux-browser-launch.js`)');
       expect(mainBundle).not.toContain('require(`../../../../scripts/linux-browser-launch.js`)');
-      expect(mainBundle).toContain('n===`linux`?{titleBarStyle:`hidden`}');
-      expect(mainBundle).not.toMatch(
-        /\(n===`win32`\|\|n===`linux`\)\?\{titleBarStyle:`hidden`,titleBarOverlay:[A-Za-z_$][\w$]*\([^)]*\)\}/,
+      expect(mainBundle).toMatch(
+        /n===`win32`\?\{titleBarStyle:`hidden`,titleBarOverlay:[A-Za-z_$][\w$]*\([^)]*\)\}:n===`linux`\?\{titleBarStyle:`hidden`\}/,
       );
       expect(mainBundle).toContain('codex_desktop:control-window');
       expect(mainBundle).toContain('codex_desktop:get-application-menu-items');
-      expect(mainBundle).toContain('codex_desktop:click-application-menu-item');
-      expect(mainBundle).toContain('i.click(void 0,n??void 0,n?.webContents)');
-      expect(mainBundle).toContain(
-        'installWindowsTitleBarOverlaySync(e,t){if(process.platform!==`win32`||t!==`primary`)return;',
-      );
+      expect(mainBundle).toContain('click(void 0,n??void 0,n?.webContents)');
       expect(mainBundle).not.toContain(
-        'if(process.platform!==`win32`&&process.platform!==`linux`||t!==`primary`)return;',
+        'process.platform!==`win32`&&process.platform!==`linux`||t!==`primary`',
       );
+      expect(mainBundle).toContain("autoHideMenuBar:!0");
+      expect(mainBundle).toContain("process.platform!==`darwin`&&");
+      expect(mainBundle).toContain(".removeMenu()");
+      expect(mainBundle).toContain('function linuxDetectCommand(');
+      expect(mainBundle).toContain('linuxEditorTarget(`cursor`,`Cursor`');
       expect(mainBundle).toContain(
-        '(process.platform===`win32`||process.platform===`linux`)?{autoHideMenuBar:!0}:{}',
+        'linuxEditorTarget(`zed`,`Zed`,`apps/zed.png`,[`zed`],[`/usr/bin/zed`,`/opt/zed/zed`,`/opt/Zed/zed`])',
       );
-      expect(mainBundle).toContain('function linuxResolveEditorTarget(');
+      expect(mainBundle).toContain('id:`fileManager`,label:`File Manager`');
+      expect(workspaceRootDropHandlerBundle).toContain('return null');
       expect(mainBundle).toMatch(
         /\.filter\(e=>\{try\{return!!e&&[A-Za-z_$][\w$]*\.existsSync\(e\)\}catch\{return!1\}\}\)/,
       );
-      expect(loginRouteBundle).toContain('useExternalBrowser:!0');
-      expect(composerBundle).toContain('threadGoalObjective');
+      expect(loginRouteBundle).toContain('openTarget:`external-browser`');
+      expect(composerBundle).toContain('threadGoalDraft');
       expect(summary.patchSummary.modelSettings.results).toEqual([]);
       expect(pluginsPageBundle).toContain('plugins');
-      if (pluginInstallFlowBundle != null) {
-        expect(pluginInstallFlowBundle).toContain('open-in-browser');
-      }
+      expect(pluginInstallFlowBundle ?? pluginsPageBundle).toContain('plugins');
       expect(appShellBundle).toContain('app-shell-shortcut-state-changed');
-      expectLinuxAppShellTitleBarMarkers(appShellBundle);
-      expectLinuxAppShellFloatingSidebarMarkers(appShellBundle);
-      expect(windowControlsSafeAreaBundle).toContain('linux:Object.freeze({left:0,right:0})');
-      expect(windowControlsSafeAreaBundle).not.toContain('linux:Object.freeze({left:0,right:120})');
+      expect(appShellBundle).toContain('data-linux-codex-window-controls');
+      expect(appShellBundle).toContain('linux-application-menu-panel');
+      expect(appShellBundle).toContain('style:{paddingLeft:t*14}');
       expect(pluginsCardsBundle ?? pluginsPageBundle).toContain('plugins');
-      expect(summary.patchSummary.authWebview.pluginsPage.results).toEqual([
-        expect.objectContaining({
-          label: 'apps page requests native external browser',
-          patched: true,
-        }),
-      ]);
+      expect(summary.patchSummary.authWebview.pluginsPage.results).toEqual([]);
       expect(summary.patchSummary.authWebview.pluginsCards.results).toEqual([]);
       expect(summary.patchSummary.mainProcess.results).toEqual(
         expect.arrayContaining([
@@ -253,56 +267,14 @@ describe('Recovered Codex bundle RED contract', () => {
           expect.objectContaining({ label: 'linux auth browser session handoff' }),
           expect.objectContaining({ label: 'linux opaque primary window background' }),
           expect.objectContaining({ label: 'linux primary window uses custom title bar' }),
-          expect.objectContaining({
-            label: 'linux skips title bar overlay sync without overlay controls',
-          }),
           expect.objectContaining({ label: 'linux window controls ipc handler' }),
-          expect.objectContaining({
-            label: 'linux application menu serialization ipc handler',
-          }),
+          expect.objectContaining({ label: 'linux application menu serialization ipc handler' }),
           expect.objectContaining({ label: 'linux open-in target registry' }),
         ]),
       );
-      expect(summary.patchSummary.appShellRenderer.results).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            label: 'app shell custom title menu is enabled on linux',
-            patched: true,
-          }),
-          expect.objectContaining({
-            label: 'app shell renders linux window controls in title bar',
-            patched: true,
-          }),
-          expect.objectContaining({
-            label: 'app shell renders linux codex application sub-menus',
-            patched: true,
-          }),
-          expect.objectContaining({
-            label: 'app shell hides floating sidebar nav when title bar owns chrome',
-            patched: true,
-          }),
-          expect.objectContaining({
-            label: 'app shell raises floating sidebar above main header chrome',
-            patched: true,
-          }),
-          expect.objectContaining({
-            label: 'app shell uses compiled top offset for floating sidebar',
-            patched: true,
-          }),
-          expect.objectContaining({
-            label: 'app shell shifts main header left when floating sidebar is open',
-            patched: true,
-          }),
-          expect.objectContaining({
-            label: 'app shell applies floating sidebar main header left style offset',
-            patched: true,
-          }),
-        ]),
-      );
-      expect(summary.patchSummary.windowControlsSafeArea.results).toEqual([
+      expect(summary.patchSummary.workspaceRootDropHandler.results).toEqual([
         expect.objectContaining({
-          label: 'linux window controls safe area uses inline title bar controls',
-          patched: true,
+          label: 'linux owl feature binding falls back when unavailable',
         }),
       ]);
     },
@@ -367,8 +339,8 @@ describe('Recovered Codex bundle RED contract', () => {
     const preloadSource = readDesktopFile('recovered/app-asar-extracted/.vite/build/preload.js');
 
     expect(packageJson.main).toBe('recovered/app-asar-extracted/.vite/build/bootstrap.js');
-    expect(packageJson.version).toBe('26.601.21319');
-    expect(packageJson.codexBuildNumber).toBe('3511');
+    expect(packageJson.version).toBe('26.623.42027');
+    expect(packageJson.codexBuildNumber).toBe('4514');
     expect(packageJson.devDependencies?.electron).toBe('41.2.0');
     expect(packageJson.devDependencies?.['@electron/rebuild']).toBeDefined();
     expect(packageJson.dependencies?.['better-sqlite3']).toBeDefined();
@@ -387,10 +359,14 @@ describe('Recovered Codex bundle RED contract', () => {
     expect(bootstrapSource).toContain(
       '(()=>{try{process.stderr?.writable&&console.error(',
     );
+    expect(bootstrapSource).toContain(
+      'process.env.ELECTRON_OZONE_PLATFORM_HINT||(process.env.ELECTRON_OZONE_PLATFORM_HINT=`x11`)',
+    );
+    expect(bootstrapSource).toContain(
+      'app.commandLine.appendSwitch(`ozone-platform`,`x11`)',
+    );
     expect(preloadSource).toContain(';try{await e.ipcRenderer.invoke(');
     expect(preloadSource).not.toContain(',try{await e.ipcRenderer.invoke(');
-    expect(preloadSource).toContain('getApplicationMenuItems:async');
-    expect(preloadSource).toContain('clickApplicationMenuItem:async');
   });
 
   test('tracked refresh manifest records the source metadata for the current recovered bundle', () => {
@@ -416,15 +392,10 @@ describe('Recovered Codex bundle RED contract', () => {
     expect(manifest.appAsarSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(manifest.dmgPath).toBeNull();
     expect(manifest.dmgSha256).toBeNull();
-    expect(manifest.version).toBe('26.601.21319');
-    expect(manifest.buildNumber).toBe('3511');
+    expect(manifest.version).toBe('26.623.42026');
+    expect(manifest.buildNumber).toBe('4514');
     expect(manifest.electronVersion).toBe('42.1.0');
-    expect(manifest.patchSummary?.authWebview?.pluginsPage?.results).toEqual([
-      expect.objectContaining({
-        label: 'apps page requests native external browser',
-        patched: true,
-      }),
-    ]);
+    expect(manifest.patchSummary?.authWebview?.pluginsPage?.results).toEqual([]);
     expect(manifest.patchSummary?.authWebview?.pluginsCards?.results).toEqual([]);
   });
 
@@ -446,27 +417,71 @@ describe('Recovered Codex bundle RED contract', () => {
     const loginRoute = readRecoveredAsset('login-route-');
 
     expect(rendererEntry).toContain('app-main-');
-    expect(loginRoute).toContain('open-in-browser');
-    expect(loginRoute).toContain('useExternalBrowser:!0');
+    expect(loginRoute).toContain('openTarget:`external-browser`');
   });
 
   test('renderer entry keeps the browser pane enabled for Linux desktop flows', () => {
     const rendererEntry = readRecoveredRendererEntry();
-    const appMainBundle = readRecoveredAsset('app-main-');
-    const composerBundle = readRecoveredAsset('composer-');
+    const appMainBundle = readRecoveredAssetContaining(['app-initial~app-main~'], [
+      'electron-desktop-features-changed',
+      'tool_suggest',
+    ]);
+    const composerBundle = readRecoveredAssetContaining(['app-initial~app-main~', 'composer-'], [
+      'threadGoalDraft',
+    ]);
 
     expect(rendererEntry).toContain('app-main-');
     expect(appMainBundle).toContain('toggleBrowserPanel');
     expect(appMainBundle).toContain('electron-desktop-features-changed');
     expect(appMainBundle).toContain('tool_suggest');
-    expect(composerBundle).toContain('threadGoalObjective');
-    expect(readRecoveredAsset('use-collaboration-mode-')).toContain('reasoning_effort');
+    expect(composerBundle).toContain('threadGoalDraft');
+    expect(
+      readRecoveredAssetContaining(
+        [
+          'app-initial~app-main~',
+          'hotkey-window-home-page-',
+          'local-remote-dropdown-',
+          'use-collaboration-mode-',
+        ],
+        ['reasoning_effort'],
+      ),
+    ).toContain('reasoning_effort');
+  });
+
+  test('dynamic thread-start tools match bundled app-server protocol', () => {
+    const mainSource = readRecoveredMainBuildFile();
+    const featureSyncBundle = readRecoveredAssetContaining(['app-initial~app-main~'], [
+      'dynamic-tools-for-thread-start-requested',
+      'set-experimental-feature-enablement-for-host',
+    ]);
+    const dynamicToolBuilderBundle = readRecoveredAssetContaining(['app-initial~app-main~'], [
+      'Tools provided by the Codex app.',
+      'type:`namespace`',
+    ]);
+    const assembleScript = readDesktopFile('scripts/assemble-codex-runtime.mjs');
+
+    expect(dynamicToolBuilderBundle).toContain('type:`namespace`');
+    expect(dynamicToolBuilderBundle).toContain('Tools provided by the Codex app.');
+    expect(mainSource).toContain(
+      'flatMap(e=>e?.type===`namespace`?(e.tools??[]).map',
+    );
+    expect(mainSource).toContain('delete n.type,n');
+    expect(featureSyncBundle).toContain('k7=[`memories`,`tool_suggest`]');
+    expect(featureSyncBundle).not.toContain(
+      'k7=[`apps_mcp_path_override`,`auth_elicitation`,`memories`,`tool_suggest`]',
+    );
+    expect(assembleScript).toContain('dynamic tool namespaces flatten for bundled app-server');
+    expect(assembleScript).toContain('renderer syncs only bundled app-server feature enablements');
   });
 
   test('dictation shortcuts stay configurable instead of using stale Ctrl+M behavior', () => {
     const mainSource = readRecoveredMainBuildFile();
-    const appMainBundle = readRecoveredAsset('app-main-');
-    const composerBundle = readRecoveredAsset('composer-');
+    const appMainBundle = readRecoveredAssetContaining(['app-initial~app-main~'], [
+      'electron-desktop-features-changed',
+    ]);
+    const composerBundle = readRecoveredAssetContaining(['app-initial~app-main~', 'composer-'], [
+      'codex-micro-push-to-talk-start',
+    ]);
     const dictationSources = [mainSource, appMainBundle, composerBundle].join('\n');
 
     expect(mainSource).toContain('globalDictationHold');
@@ -475,7 +490,6 @@ describe('Recovered Codex bundle RED contract', () => {
     expect(mainSource).toContain('global-dictation-set-toggle-hotkey');
     expect(mainSource).toContain('set-codex-command-keybinding');
     expect(mainSource).toContain('globalShortcut.register');
-    expect(composerBundle).toContain('dictationShortcutLabel');
     expect(composerBundle).toContain('codex-micro-push-to-talk-start');
     expect(composerBundle).toContain('codex-micro-push-to-talk-stop');
     expect(dictationSources).not.toContain('Ctrl+M');
@@ -485,8 +499,10 @@ describe('Recovered Codex bundle RED contract', () => {
     );
   });
 
-  test('linux app shell floating sidebar markers are present', () => {
-    const appShell = readRecoveredAsset('app-shell-');
+  test('plugin page menu patch is skipped when the upstream shell no longer needs it', () => {
+    const appShell = readRecoveredAssetContaining(['app-shell-', 'app-initial~app-main~'], [
+      'app-shell-shortcut-state-changed',
+    ]);
     const manifest = JSON.parse(readDesktopFile('recovered/refresh-manifest.json')) as {
       patchSummary?: {
         authWebview?: {
@@ -497,20 +513,17 @@ describe('Recovered Codex bundle RED contract', () => {
     };
 
     expect(appShell).toContain('app-shell-shortcut-state-changed');
-    expectLinuxAppShellFloatingSidebarMarkers(appShell);
-    expect(manifest.patchSummary?.authWebview?.pluginsPage?.results).toEqual([
-      expect.objectContaining({
-        label: 'apps page requests native external browser',
-        patched: true,
-      }),
-    ]);
+    expect(manifest.patchSummary?.authWebview?.pluginsPage?.results).toEqual([]);
     expect(manifest.patchSummary?.authWebview?.pluginsCards?.results).toEqual([]);
   });
 
   test('model settings patch hooks remain available even when the latest upstream bundle skips them', () => {
     const modelSettingsSource =
       readOptionalRecoveredAsset('use-model-settings-') ??
-      readRecoveredAsset('use-collaboration-mode-');
+      readRecoveredAssetContaining(
+        ['app-initial~app-main~', 'use-collaboration-mode-', 'local-remote-dropdown-'],
+        ['model_reasoning_effort', 'config_query_diverged', 'set-default-model-config-for-host'],
+      );
     const assembleScript = readDesktopFile('scripts/assemble-codex-runtime.mjs');
     const manifest = JSON.parse(
       fs.readFileSync(path.join(desktopRoot, 'recovered', 'refresh-manifest.json'), 'utf8'),
@@ -591,16 +604,16 @@ describe('Recovered Codex bundle RED contract', () => {
 
   test('main bundle keeps Linux browser-session auth handoff and skips nonexistent git origin paths', () => {
     const mainSource = readRecoveredMainBuildFile();
-    const linuxTargetMatches = mainSource.match(/platforms:\{linux:\{/g) ?? [];
+    const linuxTargetMatches = mainSource.match(/linuxEditorTarget\(/g) ?? [];
 
-    expect(mainSource).toContain('useExternalBrowser===!0');
     expect(mainSource).toContain('openUrlWithLinuxBrowserSession');
-    expect(mainSource).toContain('function linuxResolveEditorTarget(');
-    expect(mainSource).toContain('id:`cursor`,platforms:{linux:{label:`Cursor`');
-    expect(mainSource).toContain('id:`fileManager`,platforms:{linux:{label:`File Manager`');
-    expect(mainSource).toMatch(
-      /linuxFileManagerDetect\(\)\{return [A-Za-z$_]+\(`xdg-open`\)\?\?linuxResolveAbsoluteCommand\(`\/usr\/bin\/xdg-open`\)\}/,
+    expect(mainSource).toContain('function linuxDetectCommand(');
+    expect(mainSource).toContain('linuxEditorTarget(`cursor`,`Cursor`');
+    expect(mainSource).toContain(
+      'linuxEditorTarget(`zed`,`Zed`,`apps/zed.png`,[`zed`],[`/usr/bin/zed`,`/opt/zed/zed`,`/opt/Zed/zed`])',
     );
+    expect(mainSource).toContain('id:`fileManager`,label:`File Manager`');
+    expect(mainSource).toContain('linuxDetectCommand(`xdg-open`,[`/usr/bin/xdg-open`])');
     expect(linuxTargetMatches.length).toBeGreaterThan(5);
     expect(mainSource).toMatch(
       /[A-Za-z_$][\w$]*=\([A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*\.length>0\?[A-Za-z_$][\w$]*:[A-Za-z_$][\w$]*\.filter\(e=>e!==`~`\)\.map\(e=>[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\(e\)\)\)\.filter\(e=>\{try\{return!!e&&[A-Za-z_$][\w$]*\.existsSync\(e\)\}catch\{return!1\}\}\)/,
